@@ -330,10 +330,10 @@
     page.classList.remove('playing');
   });
 
-  // —— 事件绑定：双层保障 ——
-  // ① 视频容器（整个媒体区）：绕开视频原生层遮挡
-  // ② 头部热区：桌面端精准点击
-  // 只使用 click + touchend，不用 touchstart（避免 preventDefault 阻断手势）
+  // —— 事件绑定：只允许头部区域触发 ——
+  // 移动端视频会渲染成原生层盖住 DOM，所以事件必须绑到媒体容器上才能收到触摸。
+  // 但在处理函数里判断触摸坐标是否落在头部热区矩形内，不在就忽略，
+  // 这样既保证了手机端可点，又限制了只有头部区域才生效。
 
   function getPoint(e) {
     let cx = 0, cy = 0;
@@ -350,25 +350,24 @@
     return { cx, cy };
   }
 
+  // 判断点是否落在头部热区矩形内
+  function isInsideHead(cx, cy) {
+    const rect = headHotspot.getBoundingClientRect();
+    return cx >= rect.left && cx <= rect.right &&
+           cy >= rect.top  && cy <= rect.bottom;
+  }
+
   function onTap(e) {
-    e.stopPropagation();
     const { cx, cy } = getPoint(e);
+    if (!isInsideHead(cx, cy)) return;  // 不在头部区域，忽略
+    e.stopPropagation();
+    e.preventDefault();
     playOnce(cx, cy);
   }
 
-  // 绑定到媒体容器（主要，移动端可靠）
+  // 只绑到媒体容器（手机端视频原生层会盖住热区，必须绑到容器才能收到）
   mediaWrap.addEventListener('click', onTap);
-  mediaWrap.addEventListener('touchend', function(e) {
-    e.preventDefault();
-    onTap(e);
-  }, { passive: false });
-
-  // 绑定到头部热区（辅助，桌面端精准）
-  headHotspot.addEventListener('click', onTap);
-  headHotspot.addEventListener('touchend', function(e) {
-    e.preventDefault();
-    onTap(e);
-  }, { passive: false });
+  mediaWrap.addEventListener('touchend', onTap, { passive: false });
 
   // 启动
   if (document.readyState === 'loading') {
