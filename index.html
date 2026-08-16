@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>摸摸头</title>
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html, body {
+    height: 100%;
+    width: 100%;
+  }
+
+  body {
+    background: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    overflow: hidden;
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .page {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 480px;
+    height: 100vh;
+    background: #fff;
+    position: relative;
+  }
+
+  /* ===== 媒体区 ===== */
+  .media-area {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: #fff;
+  }
+
+  .media-wrap {
+    position: relative;
+    width: 100%;
+    line-height: 0;
+    font-size: 0;
+    overflow: hidden;
+  }
+
+  #laughVideo {
+    width: 100%;
+    height: auto;
+    display: block;
+    outline: none;
+    border: none;
+    box-shadow: none;
+    appearance: none;
+    -webkit-appearance: none;
+    background: #fff;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* 隐藏所有原生控件 */
+  #laughVideo::-webkit-media-controls                          { display: none !important; }
+  #laughVideo::-webkit-media-controls-enclosure               { display: none !important; }
+  #laughVideo::-webkit-media-controls-panel                   { display: none !important; }
+  #laughVideo::-webkit-media-controls-overlay-cast-button     { display: none !important; }
+  #laughVideo::-webkit-media-controls-overlay-play-button     { display: none !important; }
+  #laughVideo::-webkit-media-controls-start-playback-button   { display: none !important; }
+
+  /* 透明遮罩，挡浏览器注入的按钮 */
+  .video-shield {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: transparent;
+    pointer-events: none;
+  }
+
+  /* ===== 加载占位层 ===== */
+  .loading-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.35s ease;
+  }
+
+  .loading-layer.hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .loader-ring {
+    width: 44px;
+    height: 44px;
+    border: 4px solid #e8e8e8;
+    border-top-color: #222;
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* ===== 头部触摸热区 ===== */
+  .head-hotspot {
+    position: absolute;
+    z-index: 5;
+    /* 头部热区位置：如果没对准，按视频画面改这4个值即可（都是相对画面的百分比）
+       top   : 离画面顶部多远
+       left  : 离画面左边多远
+       width : 热区宽度
+       height: 热区高度 */
+    top: 5%;
+    left: 18%;
+    width: 64%;
+    height: 45%;
+    border-radius: 50% / 45%;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+
+  /* 热区本身完全隐形（无边框、无光晕），但仍可触摸/点击 */
+  .head-hotspot::before {
+    content: none;
+  }
+
+  /* 点击反馈：轻微按下缩放 */
+  .head-hotspot:active {
+    transform: scale(0.97);
+  }
+
+  /* 播放中时禁用热区（不响应，直到本次播完） */
+  .page.playing .head-hotspot {
+    pointer-events: none;
+  }
+
+  /* ===== 触摸反馈（瞬时涟漪） ===== */
+  .ripple {
+    position: absolute;
+    width: 60px;
+    height: 60px;
+    margin-left: -30px;
+    margin-top: -30px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.55);
+    border: 2px solid rgba(30, 30, 30, 0.25);
+    pointer-events: none;
+    z-index: 20;
+    animation: ripple-out 0.6s ease-out forwards;
+  }
+
+  @keyframes ripple-out {
+    0%   { transform: scale(0.3); opacity: 0.9; }
+    100% { transform: scale(2.6); opacity: 0;   }
+  }
+
+  /* ===== 底部提示栏 ===== */
+  .tip-bar {
+    height: 76px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 16px;
+    background: #fff;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .tip-text {
+    font-size: 14px;
+    color: #9aa0a6;
+    letter-spacing: 0.3px;
+    transition: opacity 0.3s ease;
+  }
+
+  .page.playing .tip-text {
+    opacity: 0.35;
+  }
+</style>
+</head>
+<body>
+  <div class="page" id="page">
+    <div class="media-area">
+      <div class="media-wrap" id="mediaWrap">
+
+        <!-- 加载占位 -->
+        <div class="loading-layer" id="loadingLayer">
+          <div class="loader-ring"></div>
+        </div>
+
+        <video id="laughVideo"
+               src="laugh.mp4"
+               playsinline
+               preload="auto"
+               muted
+               x5-playsinline
+               x-webkit-airplay="deny"
+               disablepictureinpicture
+               disableremoteplayback
+               controlslist="nodownload nofullscreen noremoteplayback"></video>
+
+        <!-- 透明遮罩：挡浏览器注入的投屏/画中画按钮 -->
+        <div class="video-shield"></div>
+
+        <!-- 头部触摸热区：默认位置稍后根据视频实际画面微调 -->
+        <div class="head-hotspot" id="headHotspot" aria-label="点我"></div>
+      </div>
+    </div>
+
+    <div class="tip-bar">
+      <div class="tip-text">摸摸她的头 · 试试</div>
+    </div>
+  </div>
+
+<script>
+  const page        = document.getElementById('page');
+  const video       = document.getElementById('laughVideo');
+  const loadingLayer= document.getElementById('loadingLayer');
+  const headHotspot = document.getElementById('headHotspot');
+  const mediaWrap   = document.getElementById('mediaWrap');
+
+  let isPlaying = false;
+
+  // —— 加载完首帧后停在第 0 秒，显示首帧（= 当 poster 用）——
+  function onFirstFrameReady() {
+    try {
+      video.pause();
+      video.currentTime = 0;
+    } catch (e) {}
+    loadingLayer.classList.add('hidden');
+  }
+
+  function triggerFirstFrame() {
+    // muted 状态下可以无用户手势 play → 立即 pause 以显示首帧
+    const p = video.play();
+    if (p && p.then) {
+      p.then(() => {
+        video.pause();
+        video.currentTime = 0;
+        loadingLayer.classList.add('hidden');
+      }).catch(() => {
+        // 播放失败也隐藏加载（可能某些浏览器策略）
+        loadingLayer.classList.add('hidden');
+      });
+    } else {
+      loadingLayer.classList.add('hidden');
+    }
+  }
+
+  // —— 初始化 ——
+  function init() {
+    const fallbackTimer = setTimeout(() => loadingLayer.classList.add('hidden'), 3000);
+
+    video.addEventListener('loadeddata', () => {
+      clearTimeout(fallbackTimer);
+      triggerFirstFrame();
+    }, { once: true });
+
+    // 微信环境兼容
+    if (typeof WeixinJSBridge !== 'undefined') {
+      WeixinJSBridge.invoke('getNetworkType', {}, () => {
+        video.load();
+      });
+    } else {
+      video.load();
+    }
+  }
+
+  // —— 播放一遍 ——
+  function playOnce(clientX, clientY) {
+    if (isPlaying) return;
+    isPlaying = true;
+    page.classList.add('playing');
+
+    // 点击涟漪反馈（以媒体区为参考的相对坐标）
+    const rect = mediaWrap.getBoundingClientRect();
+    const r = document.createElement('div');
+    r.className = 'ripple';
+    r.style.left = (clientX - rect.left) + 'px';
+    r.style.top  = (clientY - rect.top)  + 'px';
+    mediaWrap.appendChild(r);
+    setTimeout(() => r.remove(), 650);
+
+    try { video.currentTime = 0; } catch (e) {}
+    // 用户手势 → 允许解除静音
+    try { video.muted = false; } catch (e) {}
+
+    const p = video.play();
+    if (p && p.then) {
+      p.catch(() => {
+        // 某些浏览器强制静音也能播
+        video.muted = true;
+        video.play().catch(() => {});
+      });
+    }
+  }
+
+  // —— 结束 → 回到静止 ——
+  video.addEventListener('ended', () => {
+    try { video.pause(); } catch (e) {}
+    try { video.currentTime = 0; } catch (e) {}
+    video.muted = true;
+    isPlaying = false;
+    page.classList.remove('playing');
+  });
+
+  // —— 绑定触摸 / 点击到头部热区 ——
+  function handleTap(e) {
+    // 取首次触点坐标或点击坐标
+    let cx, cy;
+    if (e.touches && e.touches.length) {
+      cx = e.touches[0].clientX;
+      cy = e.touches[0].clientY;
+    } else if (e.changedTouches && e.changedTouches.length) {
+      cx = e.changedTouches[0].clientX;
+      cy = e.changedTouches[0].clientY;
+    } else {
+      cx = e.clientX;
+      cy = e.clientY;
+    }
+    playOnce(cx, cy);
+  }
+
+  headHotspot.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    handleTap(e);
+  }, { passive: false });
+
+  headHotspot.addEventListener('click', handleTap);
+
+  // 启动
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+</script>
+</body>
+</html>
