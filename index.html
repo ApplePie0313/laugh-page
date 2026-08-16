@@ -285,7 +285,7 @@
     }
   }
 
-  // —— 播放一遍 ——
+  // —— 播放一遍（用于 click / touchend 统一入口）——
   function playOnce(clientX, clientY) {
     if (isPlaying) return;
     isPlaying = true;
@@ -301,15 +301,22 @@
     setTimeout(() => r.remove(), 650);
 
     try { video.currentTime = 0; } catch (e) {}
-    // 用户手势 → 允许解除静音
+
+    // 先尝试带声音播放（用户手势内允许）
     try { video.muted = false; } catch (e) {}
 
-    const p = video.play();
-    if (p && p.then) {
+    let p;
+    try {
+      p = video.play();
+    } catch (e) {
+      p = null;
+    }
+
+    if (p && typeof p.then === 'function') {
       p.catch(() => {
-        // 某些浏览器强制静音也能播
-        video.muted = true;
-        video.play().catch(() => {});
+        // 某些浏览器（尤其微信/部分安卓）必须静音才能播
+        try { video.muted = true; } catch (e) {}
+        try { video.play(); } catch (e) {}
       });
     }
   }
@@ -318,34 +325,50 @@
   video.addEventListener('ended', () => {
     try { video.pause(); } catch (e) {}
     try { video.currentTime = 0; } catch (e) {}
-    video.muted = true;
+    try { video.muted = true; } catch (e) {}
     isPlaying = false;
     page.classList.remove('playing');
   });
 
-  // —— 绑定触摸 / 点击到头部热区 ——
-  function handleTap(e) {
-    // 取首次触点坐标或点击坐标
-    let cx, cy;
+  // —— 事件绑定：双层保障 ——
+  // ① 视频容器（整个媒体区）：绕开视频原生层遮挡
+  // ② 头部热区：桌面端精准点击
+  // 只使用 click + touchend，不用 touchstart（避免 preventDefault 阻断手势）
+
+  function getPoint(e) {
+    let cx = 0, cy = 0;
     if (e.touches && e.touches.length) {
       cx = e.touches[0].clientX;
       cy = e.touches[0].clientY;
     } else if (e.changedTouches && e.changedTouches.length) {
       cx = e.changedTouches[0].clientX;
       cy = e.changedTouches[0].clientY;
-    } else {
+    } else if (typeof e.clientX === 'number') {
       cx = e.clientX;
       cy = e.clientY;
     }
+    return { cx, cy };
+  }
+
+  function onTap(e) {
+    e.stopPropagation();
+    const { cx, cy } = getPoint(e);
     playOnce(cx, cy);
   }
 
-  headHotspot.addEventListener('touchstart', (e) => {
+  // 绑定到媒体容器（主要，移动端可靠）
+  mediaWrap.addEventListener('click', onTap);
+  mediaWrap.addEventListener('touchend', function(e) {
     e.preventDefault();
-    handleTap(e);
+    onTap(e);
   }, { passive: false });
 
-  headHotspot.addEventListener('click', handleTap);
+  // 绑定到头部热区（辅助，桌面端精准）
+  headHotspot.addEventListener('click', onTap);
+  headHotspot.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    onTap(e);
+  }, { passive: false });
 
   // 启动
   if (document.readyState === 'loading') {
